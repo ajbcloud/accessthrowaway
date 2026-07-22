@@ -1,0 +1,10 @@
+{
+  "meta": { "host": "10.0.0.5", "port": "12445", "time": "2026-07-22T00:00:00.000Z" },
+  "doors": [
+    { "id": "d-1", "name": "Elevator Floor 1", "floor_id": "f-1", "floor_name": "Floor 1", "lock_relay": "lock", "position": "close", "bound_hub": true, "type": "door" },
+    { "id": "d-2", "name": "Elevator Floor 2", "floor_id": "f-2", "floor_name": "Floor 2", "lock_relay": "lock", "position": "close", "bound_hub": true, "type": "door" },
+    { "id": "d-3", "name": "Elevator Floor 3", "floor_id": "f-3", "floor_name": "Floor 3", "lock_relay": "lock", "position": "close", "bound_hub": true, "type": "door" }
+  ],
+  "floors": [],
+  "door_groups": []
+}

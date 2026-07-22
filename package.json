@@ -1,0 +1,35 @@
+{
+  "name": "unifi-access-elevator-probe",
+  "version": "0.1.0",
+  "description": "Read only UniFi Access diagnostic that maps elevator floors to door/relay endpoints and diffs snapshots to pin a floor to its relay.",
+  "main": "ua-elevator-probe.js",
+  "bin": {
+    "ua-elevator-probe": "ua-elevator-probe.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "scripts": {
+    "probe": "node ua-elevator-probe.js",
+    "diff": "node ua-elevator-probe.js --diff",
+    "test": "node --test"
+  },
+  "keywords": [
+    "unifi",
+    "unifi-access",
+    "ubiquiti",
+    "access-control",
+    "elevator",
+    "diagnostic",
+    "probe"
+  ],
+  "author": {
+    "name": "AJBCloud",
+    "url": "https://github.com/ajbcloud"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ajbcloud/accessthrowaway.git"
+  }
+}
