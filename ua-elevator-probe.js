@@ -51,19 +51,46 @@
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-
-// ---------------------------------------------------------------------------
-// Config (env driven)
-// ---------------------------------------------------------------------------
-
-const HOST = process.env.UA_HOST;
-const PORT = process.env.UA_PORT || '12445';
-const TOKEN = process.env.UA_TOKEN || process.env.UNIFI_API_TOKEN;
-const TIMEOUT_MS = Number(process.env.UA_TIMEOUT_MS || 10000);
-const OUT_DIR = process.env.UA_OUT_DIR || '.';
-const VERIFY_SSL = String(process.env.UA_VERIFY_SSL || '').toLowerCase() === 'true';
+const readline = require('readline');
 
 const BASE_PATH = '/api/v1/developer';
+
+// ---------------------------------------------------------------------------
+// Config (CLI flags override environment variables)
+// ---------------------------------------------------------------------------
+
+// Populated in main() by merging CLI flags over environment variables. The
+// pure functions below (normalize/diff) never read this; only the HTTP and
+// file helpers do, and only after main() has resolved it.
+let cfg = resolveConfig({});
+
+function parseArgs(args) {
+  const flags = {};
+  for (let i = 0; i < args.length; i++) {
+    switch (args[i]) {
+      case '--host': flags.host = args[++i]; break;
+      case '--token': flags.token = args[++i]; break;
+      case '--port': flags.port = args[++i]; break;
+      case '--out-dir': flags.outDir = args[++i]; break;
+      case '--timeout': flags.timeoutMs = Number(args[++i]); break;
+      case '--verify-ssl': flags.verifySsl = true; break;
+      default: break;
+    }
+  }
+  return flags;
+}
+
+function resolveConfig(flags) {
+  flags = flags || {};
+  return {
+    host: flags.host || process.env.UA_HOST || null,
+    port: flags.port || process.env.UA_PORT || '12445',
+    token: flags.token || process.env.UA_TOKEN || process.env.UNIFI_API_TOKEN || null,
+    timeoutMs: flags.timeoutMs || Number(process.env.UA_TIMEOUT_MS || 10000),
+    outDir: flags.outDir || process.env.UA_OUT_DIR || '.',
+    verifySsl: flags.verifySsl || String(process.env.UA_VERIFY_SSL || '').toLowerCase() === 'true'
+  };
+}
 
 // ---------------------------------------------------------------------------
 // HTTP helper
@@ -72,13 +99,13 @@ const BASE_PATH = '/api/v1/developer';
 function apiGet(reqPath) {
   return new Promise((resolve, reject) => {
     const options = {
-      host: HOST,
-      port: PORT,
+      host: cfg.host,
+      port: cfg.port,
       path: BASE_PATH + reqPath,
       method: 'GET',
-      rejectUnauthorized: VERIFY_SSL,
+      rejectUnauthorized: cfg.verifySsl,
       headers: {
-        Authorization: 'Bearer ' + TOKEN,
+        Authorization: 'Bearer ' + cfg.token,
         Accept: 'application/json'
       }
     };
@@ -94,8 +121,8 @@ function apiGet(reqPath) {
     });
 
     req.on('error', reject);
-    req.setTimeout(TIMEOUT_MS, () => {
-      req.destroy(new Error('Request timed out after ' + TIMEOUT_MS + ' ms'));
+    req.setTimeout(cfg.timeoutMs, () => {
+      req.destroy(new Error('Request timed out after ' + cfg.timeoutMs + ' ms'));
     });
     req.end();
   });
@@ -154,10 +181,10 @@ async function fetchAllDoors() {
 
 async function collectSnapshot() {
   const meta = {
-    host: HOST,
-    port: PORT,
+    host: cfg.host,
+    port: cfg.port,
     time: new Date().toISOString(),
-    base_url: 'https://' + HOST + ':' + PORT + BASE_PATH
+    base_url: 'https://' + cfg.host + ':' + cfg.port + BASE_PATH
   };
 
   const doorsResult = await fetchAllDoors();
@@ -366,8 +393,8 @@ function stamp() {
 
 function writeRaw(name, payload) {
   try {
-    if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
-    const file = path.join(OUT_DIR, 'ua-probe-' + name + '-' + stamp() + '.json');
+    if (!fs.existsSync(cfg.outDir)) fs.mkdirSync(cfg.outDir, { recursive: true });
+    const file = path.join(cfg.outDir, 'ua-probe-' + name + '-' + stamp() + '.json');
     fs.writeFileSync(file, JSON.stringify(payload, null, 2));
     return file;
   } catch (e) {
@@ -494,24 +521,32 @@ function printUsage() {
     'UniFi Access Elevator Floor Probe (read only)',
     '',
     'Usage:',
-    '  UA_HOST=<controller-ip> UA_TOKEN=<view:space token> node ua-elevator-probe.js',
-    '  UA_HOST=<controller-ip> UA_TOKEN=<view:space token> node ua-elevator-probe.js --diff [baseline.json]',
-    '  node ua-elevator-probe.js --diff-files <baseline.json> <current.json>',
-    '  node ua-elevator-probe.js --help',
+    '  ua-elevator-probe --host <controller-ip> --token <view:space token>',
+    '  ua-elevator-probe --host <controller-ip> --token <token> --diff [baseline.json]',
+    '  ua-elevator-probe --diff-files <baseline.json> <current.json>',
+    '  ua-elevator-probe --help',
+    '',
+    '  (env vars work too: UA_HOST=<ip> UA_TOKEN=<token> ua-elevator-probe)',
+    '  (with no host/token in an interactive terminal, you are prompted)',
+    '  (when run as node: node ua-elevator-probe.js <flags>)',
     '',
     'Modes:',
     '  (default)      snapshot the controller, print the floor/relay map, write dumps',
     '  --diff [file]  snapshot again and diff against a baseline (defaults to the most',
-    '                 recent ua-probe-snapshot-*.json in UA_OUT_DIR)',
+    '                 recent ua-probe-snapshot-*.json in the output directory)',
     '  --diff-files   diff two saved snapshots offline, no controller call',
     '',
+    'Flags (override the matching environment variable):',
+    '  --host <ip>        controller IP or hostname',
+    '  --token <token>    API token, view:space scope',
+    '  --port <port>      API port (default 12445)',
+    '  --out-dir <dir>    where to write JSON dumps (default current directory)',
+    '  --timeout <ms>     per request timeout in ms (default 10000)',
+    '  --verify-ssl       verify the TLS cert (default off, self signed cert)',
+    '',
     'Environment:',
-    '  UA_HOST          controller IP or hostname (required for live modes)',
-    '  UA_TOKEN         API token, view:space scope (required; falls back to UNIFI_API_TOKEN)',
-    '  UA_PORT          API port (default 12445)',
-    '  UA_TIMEOUT_MS    per request timeout in ms (default 10000)',
-    '  UA_OUT_DIR       where to write JSON dumps (default current directory)',
-    '  UA_VERIFY_SSL    "true" to verify the TLS cert (default off, self signed cert)',
+    '  UA_HOST, UA_TOKEN (falls back to UNIFI_API_TOKEN), UA_PORT,',
+    '  UA_TIMEOUT_MS, UA_OUT_DIR, UA_VERIFY_SSL',
     '',
     'Notes:',
     '  Only issues GET requests. Cannot unlock or change anything.',
@@ -519,6 +554,70 @@ function printUsage() {
     '  and give it the view:space scope.',
     ''
   ].join('\n'));
+}
+
+// ---------------------------------------------------------------------------
+// Interactive prompt (used when the exe is double clicked with no config)
+// ---------------------------------------------------------------------------
+
+function askVisible(query) {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(query, (answer) => {
+      rl.close();
+      resolve(String(answer).trim());
+    });
+  });
+}
+
+// Reads a line without echoing it, so a token is not left on screen or in the
+// terminal scrollback. Uses raw mode, which works in Windows consoles too.
+function askHidden(query) {
+  return new Promise((resolve) => {
+    process.stdout.write(query);
+    const stdin = process.stdin;
+    const wasRaw = !!stdin.isRaw;
+    if (stdin.setRawMode) stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding('utf8');
+
+    let value = '';
+    const finish = () => {
+      if (stdin.setRawMode) stdin.setRawMode(wasRaw);
+      stdin.pause();
+      stdin.removeListener('data', onData);
+      process.stdout.write('\n');
+    };
+    const onData = (ch) => {
+      if (ch === '\r' || ch === '\n' || ch === '\u0004') { // Enter or Ctrl+D
+        finish();
+        resolve(value.trim());
+      } else if (ch === '\u0003') { // Ctrl+C
+        finish();
+        process.exit(1);
+      } else if (ch === '\u007f' || ch === '\b') { // backspace
+        value = value.slice(0, -1);
+      } else if (ch >= ' ') { // ignore stray control sequences
+        value += ch;
+      }
+    };
+    stdin.on('data', onData);
+  });
+}
+
+async function promptForConfig() {
+  console.log('');
+  console.log('No controller configured. Enter connection details (Ctrl+C to cancel).');
+  if (!cfg.host) {
+    const host = await askVisible('  Controller IP or hostname: ');
+    if (host) cfg.host = host;
+    const port = await askVisible('  API port [' + cfg.port + ']: ');
+    if (port) cfg.port = port;
+  }
+  if (!cfg.token) {
+    const token = await askHidden('  API token (view:space, input hidden): ');
+    if (token) cfg.token = token;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -553,8 +652,12 @@ async function main() {
     process.exit(0);
   }
 
-  // Live modes need host + token.
-  if (!HOST || !TOKEN) {
+  // Live modes: flags override env vars, then prompt for anything still missing.
+  cfg = resolveConfig(parseArgs(args));
+  if ((!cfg.host || !cfg.token) && process.stdin.isTTY) {
+    await promptForConfig();
+  }
+  if (!cfg.host || !cfg.token) {
     printUsage();
     process.exit(1);
   }
@@ -566,9 +669,9 @@ async function main() {
     const i = args.indexOf('--diff');
     const next = args[i + 1];
     const explicit = next && next.charAt(0) !== '-' ? next : null;
-    baselinePath = explicit || findLatestSnapshot(OUT_DIR);
+    baselinePath = explicit || findLatestSnapshot(cfg.outDir);
     if (!baselinePath) {
-      console.error('No baseline snapshot found in ' + OUT_DIR + '.');
+      console.error('No baseline snapshot found in ' + cfg.outDir + '.');
       console.error('Run the probe once without --diff first, then trigger a floor and re-run with --diff.');
       process.exit(1);
     }
@@ -577,9 +680,9 @@ async function main() {
 
   console.log('');
   console.log('UniFi Access elevator probe (read only)');
-  console.log('Target: https://' + HOST + ':' + PORT + BASE_PATH);
+  console.log('Target: https://' + cfg.host + ':' + cfg.port + BASE_PATH);
   console.log('Time:   ' + new Date().toISOString());
-  if (!VERIFY_SSL) console.log('TLS:    certificate verification off (self signed controller cert)');
+  if (!cfg.verifySsl) console.log('TLS:    certificate verification off (self signed controller cert)');
 
   const collected = await collectSnapshot();
   const snapshot = collected.snapshot;
@@ -607,7 +710,7 @@ async function main() {
   } else {
     console.log('\nNext: trigger a floor at the elevator panel, then run again with --diff');
     console.log('to see which relay endpoint changed:');
-    console.log('  UA_HOST=' + HOST + ' UA_TOKEN=*** node ua-elevator-probe.js --diff');
+    console.log('  ua-elevator-probe --host ' + cfg.host + ' --token *** --diff');
   }
 
   console.log('');

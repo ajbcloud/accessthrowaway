@@ -2,7 +2,7 @@
 
 A read only diagnostic for [Ubiquiti UniFi Access](https://ui.com/door-access). Point it at a controller and it prints a clean map of floors and the door/relay endpoints on each, with live lock and position state. It also writes the raw controller responses and a normalized snapshot to disk, and it can diff two snapshots so you can positively pin a physical floor to its relay.
 
-Built for the field: one file, zero npm dependencies, and it never sends an unlock or any other write command. A `view:space` token cannot change anything on the controller.
+Built for the field: one file, zero runtime dependencies, and it never sends an unlock or any other write command. A `view:space` token cannot change anything on the controller. It runs directly with Node, and it also ships as a standalone Windows `.exe` and an installer so a tech can run it on a machine with no Node installed.
 
 This tool reuses the API conventions proven in the [UniFi Access Orchestrator](https://github.com/ajbcloud/UniFi-Access-Orchestrator): the `https://<host>:12445/api/v1/developer` base URL, bearer token auth, and the `{ code, msg, data }` response envelope.
 
@@ -13,10 +13,12 @@ This tool reuses the API conventions proven in the [UniFi Access Orchestrator](h
 - [What you get](#what-you-get)
 - [Prerequisites](#prerequisites)
 - [Quick start](#quick-start)
+- [Windows exe and installer](#windows-exe-and-installer)
 - [Pinning a floor to a relay](#pinning-a-floor-to-a-relay)
 - [Configuration reference](#configuration-reference)
 - [Output files](#output-files)
 - [Endpoints used](#endpoints-used)
+- [Build and release](#build-and-release)
 - [Troubleshooting](#troubleshooting)
 - [Security](#security)
 - [License](#license)
@@ -34,27 +36,57 @@ This tool reuses the API conventions proven in the [UniFi Access Orchestrator](h
 
 ## Prerequisites
 
-- Node 16 or later. The probe uses only built in modules, so there is nothing to install.
+Common to every way of running it:
+
 - A machine that can reach the controller on the API port (default `12445`).
 - A UniFi Access API token with the `view:space` scope. Create one in **Access > Settings > General > Advanced > API Token**.
 - UniFi Access with the developer API enabled. The API is not available on deployments migrated to Identity Enterprise.
+
+Extra, depending on how you run it:
+
+- **From source:** Node 16 or later. The probe uses only built in modules, so there is nothing to `npm install` to run it.
+- **Windows exe or installer:** nothing. Node is bundled into the binary.
 
 ---
 
 ## Quick start
 
+Run it from source with flags:
+
 ```bash
 # Snapshot the controller and print the floor/relay map
-UA_HOST=192.168.1.10 UA_TOKEN=<view:space token> node ua-elevator-probe.js
+node ua-elevator-probe.js --host 192.168.1.10 --token <view:space token>
 ```
 
-You can also install it and use the npm scripts:
+Environment variables work too, and the npm scripts are shortcuts:
 
 ```bash
-npm run probe          # same as node ua-elevator-probe.js
-npm run diff           # same as node ua-elevator-probe.js --diff
+UA_HOST=192.168.1.10 UA_TOKEN=<token> node ua-elevator-probe.js
+npm run probe          # node ua-elevator-probe.js
+npm run diff           # node ua-elevator-probe.js --diff
 node ua-elevator-probe.js --help
 ```
+
+If you run it in a terminal with no host or token supplied, it prompts for the controller IP and token (the token input is hidden).
+
+---
+
+## Windows exe and installer
+
+Two Windows artifacts are published on each release (see [Build and release](#build-and-release)):
+
+- `ua-elevator-probe.exe` - a portable console tool. Download it, open a terminal in the download folder, and run it. No install, no admin rights.
+
+  ```bat
+  ua-elevator-probe.exe --host 192.168.1.10 --token <view:space token>
+  ua-elevator-probe.exe --diff
+  ```
+
+  Double-clicking it opens a console and prompts for the controller IP and token, then writes its dumps next to the exe.
+
+- `ua-elevator-probe-setup-<version>.exe` - an installer. It copies the tool to Program Files and, if you tick the option, adds it to the system PATH so you can run `ua-elevator-probe` from any terminal. Installing is machine-wide and needs admin rights.
+
+The binaries are unsigned unless a signing certificate is configured for the build, so Windows SmartScreen may warn the first time. Choose **More info** then **Run anyway**, or sign them with your own certificate.
 
 ---
 
@@ -84,24 +116,24 @@ node ua-elevator-probe.js --diff-files ua-probe-snapshot-BEFORE.json ua-probe-sn
 
 ## Configuration reference
 
-All configuration is through environment variables, so there is no file to create.
+There is no config file to create. Each setting can come from a CLI flag or an environment variable, and a flag always wins over the matching variable. If host or token is still missing in an interactive terminal, you are prompted.
 
-| Variable | Required | Default | What it controls |
+| Flag | Environment variable | Default | What it controls |
 | --- | --- | --- | --- |
-| `UA_HOST` | yes (live modes) | none | Controller IP or hostname |
-| `UA_TOKEN` | yes (live modes) | `UNIFI_API_TOKEN` | API token, `view:space` scope is enough |
-| `UA_PORT` | no | `12445` | Controller API port |
-| `UA_TIMEOUT_MS` | no | `10000` | Per request timeout in milliseconds |
-| `UA_OUT_DIR` | no | `.` | Directory for the JSON dumps |
-| `UA_VERIFY_SSL` | no | off | Set to `true` to verify the TLS certificate |
+| `--host <ip>` | `UA_HOST` | none | Controller IP or hostname |
+| `--token <token>` | `UA_TOKEN`, then `UNIFI_API_TOKEN` | none | API token, `view:space` scope is enough |
+| `--port <port>` | `UA_PORT` | `12445` | Controller API port |
+| `--timeout <ms>` | `UA_TIMEOUT_MS` | `10000` | Per request timeout in milliseconds |
+| `--out-dir <dir>` | `UA_OUT_DIR` | `.` | Directory for the JSON dumps |
+| `--verify-ssl` | `UA_VERIFY_SSL=true` | off | Verify the TLS certificate |
 
-`UA_TOKEN` falls back to `UNIFI_API_TOKEN` if it is unset, which matches the Orchestrator. TLS verification is off by default because the controller uses a self signed certificate.
+Host and token are required for live modes (default and `--diff`). TLS verification is off by default because the controller uses a self signed certificate.
 
 ---
 
 ## Output files
 
-Each run writes timestamped files into `UA_OUT_DIR`:
+Each run writes timestamped files into the output directory (`--out-dir` or `UA_OUT_DIR`, default the current directory):
 
 | File | Contents |
 | --- | --- |
@@ -125,6 +157,34 @@ All calls are GET and are covered by the `view:space` scope.
 | `GET /api/v1/developer/door_groups` | Flat door groups. Fallback and extra context. |
 
 If the topology endpoint is not available, the probe reconstructs the floor map from each door's `floor_id`, which the flat API always carries.
+
+---
+
+## Build and release
+
+The Windows binaries are built by GitHub Actions in `.github/workflows/release.yml`, on a `windows-latest` runner. The workflow runs the tests, packages the script into `ua-elevator-probe.exe` with [`@yao-pkg/pkg`](https://github.com/yao-pkg/pkg), builds the installer from `installer/ua-elevator-probe.iss` with Inno Setup, and uploads both as build artifacts.
+
+To cut a release, push a version tag. The same run then publishes a GitHub Release with both binaries attached:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+You can also trigger the workflow manually (Actions > Build and Release > Run workflow) to produce the artifacts without publishing a release.
+
+To build locally on a Windows machine with Node installed:
+
+```bash
+npm ci
+npm run build:exe      # writes dist/ua-elevator-probe.exe
+```
+
+Then build the installer with Inno Setup (`iscc installer\ua-elevator-probe.iss`).
+
+**Code signing (optional).** To sign the binaries, add two repository secrets: `WINDOWS_CERT_PFX_BASE64` (your code-signing certificate as base64 encoded PFX) and `WINDOWS_CERT_PASSWORD`. When they are present the workflow signs both the exe and the installer; when they are absent it skips signing and ships unsigned binaries.
+
+A separate `ci.yml` workflow runs the syntax check and tests on every push and pull request.
 
 ---
 

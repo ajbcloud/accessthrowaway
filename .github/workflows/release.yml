@@ -1,0 +1,116 @@
+name: Build and Release
+
+# Cuts a Windows build on a version tag (e.g. v0.1.0) and attaches the portable
+# exe and the installer to a GitHub Release. Can also be run manually to produce
+# the same artifacts without publishing a release.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version for the artifacts (e.g. 0.1.0). Defaults to package.json.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $input = "${{ github.event.inputs.version }}"
+          if ($tag -match '^v[0-9]') {
+            $v = $tag.Substring(1)
+          } elseif ($input -ne '') {
+            $v = $input
+          } else {
+            $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Building version $v"
+
+      - name: Build portable exe
+        run: npm run build:exe
+
+      - name: Sign portable exe (optional)
+        if: ${{ env.CERT_B64 != '' }}
+        env:
+          CERT_B64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          CERT_PW: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          $pfx = "$env:RUNNER_TEMP\cert.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_B64))
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1).FullName
+          & $signtool sign /f $pfx /p $env:CERT_PW /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 dist\ua-elevator-probe.exe
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ steps.ver.outputs.version }} installer\ua-elevator-probe.iss
+
+      - name: Sign installer (optional)
+        if: ${{ env.CERT_B64 != '' }}
+        env:
+          CERT_B64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          CERT_PW: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          $pfx = "$env:RUNNER_TEMP\cert.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_B64))
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1).FullName
+          & $signtool sign /f $pfx /p $env:CERT_PW /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 (Get-ChildItem dist\ua-elevator-probe-setup-*.exe).FullName
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: |
+            dist/ua-elevator-probe.exe
+            dist/ua-elevator-probe-setup-*.exe
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            Windows build of the UniFi Access Elevator Floor Probe.
+
+            Assets:
+            - `ua-elevator-probe.exe` - portable console tool, no install needed.
+            - `ua-elevator-probe-setup-*.exe` - installer that adds the tool to PATH.
+
+            The binaries are unsigned unless a signing certificate is configured,
+            so Windows SmartScreen may warn on first run. Choose "More info" then
+            "Run anyway", or sign them with your own certificate.
+          files: |
+            dist/ua-elevator-probe.exe
+            dist/ua-elevator-probe-setup-*.exe
