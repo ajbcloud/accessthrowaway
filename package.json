@@ -13,11 +13,11 @@
     "probe": "node ua-elevator-probe.js",
     "diff": "node ua-elevator-probe.js --diff",
     "test": "node --test",
-    "build:exe": "pkg ua-elevator-probe.js --targets node20-win-x64 --output dist/ua-elevator-probe.exe --compress GZip"
+    "build:exe": "pkg ua-elevator-probe.js --targets node22-win-x64 --output dist/ua-elevator-probe.exe --compress GZip"
   },
   "pkg": {
     "targets": [
-      "node20-win-x64"
+      "node22-win-x64"
     ],
     "outputPath": "dist"
   },
