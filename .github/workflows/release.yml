@@ -1,8 +1,9 @@
 name: Build and Release
 
-# Cuts a Windows build on a version tag (e.g. v0.1.0) and attaches the portable
-# exe and the installer to a GitHub Release. Can also be run manually to produce
-# the same artifacts without publishing a release.
+# Builds the Windows portable exe + installer and publishes them to a GitHub
+# Release. Runs on a version tag push (e.g. v0.1.0) or on manual dispatch; both
+# build AND release. A manual run can opt out of releasing by unchecking
+# "publish" to just produce the build artifact.
 on:
   push:
     tags:
@@ -10,9 +11,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version for the artifacts (e.g. 0.1.0). Defaults to package.json.'
+        description: 'Release version, e.g. 0.1.0 (tag will be v<version>). Defaults to package.json.'
         required: false
         default: ''
+      publish:
+        description: 'Publish a GitHub Release (uncheck to only build the artifact)'
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -39,17 +44,19 @@ jobs:
         id: ver
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
+          $refName = "${{ github.ref_name }}"
           $input = "${{ github.event.inputs.version }}"
-          if ($tag -match '^v[0-9]') {
-            $v = $tag.Substring(1)
-          } elseif ($input -ne '') {
-            $v = $input
+          if ("${{ github.ref }}" -like 'refs/tags/*') {
+            $tag = $refName
+            $v = $refName -replace '^v',''
           } else {
-            $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+            if ($input -ne '') { $v = $input }
+            else { $v = (Get-Content package.json -Raw | ConvertFrom-Json).version }
+            $tag = "v$v"
           }
           "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Building version $v"
+          "tag=$tag"    | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Building version $v (release tag $tag)"
 
       - name: Build portable exe
         run: npm run build:exe
@@ -96,9 +103,11 @@ jobs:
           if-no-files-found: error
 
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: ${{ startsWith(github.ref, 'refs/tags/') || github.event.inputs.publish != 'false' }}
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           body: |
