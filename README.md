@@ -82,7 +82,9 @@ Two Windows artifacts are published on each release (see [Build and release](#bu
   ua-elevator-probe.exe --diff
   ```
 
-  Double-clicking it opens a console and prompts for the controller IP and token, then writes its dumps next to the exe.
+  Double-clicking it opens a console, prompts for the controller IP and token, prints the floor/relay map, and then waits for you to press Enter before the window closes so you can read the results. Its JSON dumps are written to the folder shown as "Saved to:" in the output (the exe's folder by default). Pass `--no-pause` to skip the wait in scripts.
+
+  You do not need the installer to use this. The portable exe is fully standalone.
 
 - `ua-elevator-probe-setup-<version>.exe` - an installer. It copies the tool to Program Files and, if you tick the option, adds it to the system PATH so you can run `ua-elevator-probe` from any terminal. Installing is machine-wide and needs admin rights.
 

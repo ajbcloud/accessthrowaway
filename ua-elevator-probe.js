@@ -64,6 +64,11 @@ const BASE_PATH = '/api/v1/developer';
 // file helpers do, and only after main() has resolved it.
 let cfg = resolveConfig({});
 
+// Set true once we prompt interactively (double click with no config), and
+// used to keep the console window open at the end so the output is readable.
+let promptedInteractively = false;
+let noPause = String(process.env.UA_NO_PAUSE || '').toLowerCase() === 'true';
+
 function parseArgs(args) {
   const flags = {};
   for (let i = 0; i < args.length; i++) {
@@ -74,6 +79,7 @@ function parseArgs(args) {
       case '--out-dir': flags.outDir = args[++i]; break;
       case '--timeout': flags.timeoutMs = Number(args[++i]); break;
       case '--verify-ssl': flags.verifySsl = true; break;
+      case '--no-pause': flags.noPause = true; break;
       default: break;
     }
   }
@@ -543,6 +549,7 @@ function printUsage() {
     '  --out-dir <dir>    where to write JSON dumps (default current directory)',
     '  --timeout <ms>     per request timeout in ms (default 10000)',
     '  --verify-ssl       verify the TLS cert (default off, self signed cert)',
+    '  --no-pause         do not wait for Enter before closing (for scripts)',
     '',
     'Environment:',
     '  UA_HOST, UA_TOKEN (falls back to UNIFI_API_TOKEN), UA_PORT,',
@@ -605,7 +612,15 @@ function askHidden(query) {
   });
 }
 
+// Keeps a double clicked console window open so the output can be read before
+// the window closes. Safe to await; resolves immediately if not interactive.
+async function pause(message) {
+  if (noPause || !process.stdin.isTTY) return;
+  await askVisible('\n' + (message || 'Press Enter to close...'));
+}
+
 async function promptForConfig() {
+  promptedInteractively = true;
   console.log('');
   console.log('No controller configured. Enter connection details (Ctrl+C to cancel).');
   if (!cfg.host) {
@@ -653,7 +668,9 @@ async function main() {
   }
 
   // Live modes: flags override env vars, then prompt for anything still missing.
-  cfg = resolveConfig(parseArgs(args));
+  const flags = parseArgs(args);
+  cfg = resolveConfig(flags);
+  if (flags.noPause) noPause = true;
   if ((!cfg.host || !cfg.token) && process.stdin.isTTY) {
     await promptForConfig();
   }
@@ -691,6 +708,7 @@ async function main() {
   printTable(snapshot);
 
   console.log('\n=== RAW DUMPS ===');
+  console.log('  Saved to: ' + path.resolve(cfg.outDir));
   console.log('  doors:        ' + writeRaw('doors', collected.raw.doors));
   if (snapshot.endpoints.topology_ok) {
     console.log('  topology:     ' + writeRaw('topology', collected.raw.topology));
@@ -714,6 +732,7 @@ async function main() {
   }
 
   console.log('');
+  if (promptedInteractively) await pause('Done. Press Enter to close...');
   process.exit(0);
 }
 
@@ -725,11 +744,13 @@ module.exports = {
 };
 
 if (require.main === module) {
-  main().catch((err) => {
+  main().catch(async (err) => {
     console.error('');
     console.error('Probe failed: ' + err.message);
     console.error('Check UA_HOST/UA_PORT reachability and that UA_TOKEN is valid.');
     console.error('');
+    // Keep a double clicked window open so the error is readable.
+    await pause('Press Enter to close...');
     process.exit(1);
   });
 }

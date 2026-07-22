@@ -1,6 +1,6 @@
 {
   "name": "unifi-access-elevator-probe",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Read only UniFi Access diagnostic that maps elevator floors to door/relay endpoints and diffs snapshots to pin a floor to its relay.",
   "main": "ua-elevator-probe.js",
   "bin": {
